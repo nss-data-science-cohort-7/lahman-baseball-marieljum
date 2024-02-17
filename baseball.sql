@@ -127,7 +127,6 @@ ORDER BY w;
 
 -- How often from 1970 to 2016 was it the case that a team with the most wins also won the world series? What percentage of the time?
 
-
 SELECT yearid, 
 MAX(w) AS max_wins
 FROM teams 
@@ -140,16 +139,14 @@ FROM teams
 WHERE yearid BETWEEN 1970 AND 2016 
 ORDER BY yearid
 
-
 --
 
-	
 WITH max_win_per_year AS (
     SELECT 
         yearid, 
         MAX(w) AS max_wins
     FROM teams 
-    WHERE yearid BETWEEN 1970 AND 2016 
+    WHERE yearid BETWEEN 1970 AND 2016 AND yearid != 1994 
     GROUP BY yearid
 )
 SELECT 
@@ -157,19 +154,46 @@ SELECT
     SUM(CASE WHEN T.w = M.max_wins AND T.wswin = 'Y' THEN 1 ELSE 0 END) AS ws_win_count,
     ROUND((SUM(CASE WHEN T.w = M.max_wins AND T.wswin = 'Y' THEN 1 ELSE 0 END) * 100.0) / COUNT(DISTINCT M.yearid), 2) AS percentage
 FROM max_win_per_year M
-JOIN teams T ON M.yearid = T.yearid;
+JOIN teams T 
+USING(yearid);
 
 -- From 1970 to 2016, there were 12 teams with the most wins that also won the world series. 
--- 12/47 is a 25.53% chance that the team with the most wins also wins the world series. 
+-- 12/46 is a 26.09% chance that the team with the most wins also wins the world series. 
 
 -- 6. Which managers have won the TSN Manager of the Year award in both the National League (NL) and the American League (AL)? 
 -- Give their full name and the teams that they were managing when they won the award.
 
-
+WITH both_league_winners AS (
+	SELECT
+		playerid
+	FROM awardsmanagers
+	WHERE awardid = 'TSN Manager of the Year'
+		AND lgid IN ('AL', 'NL')
+	GROUP BY playerid
+	HAVING COUNT(DISTINCT lgid) = 2
+	)
+SELECT
+	namefirst || ' ' || namelast AS full_name,
+	yearid,
+	lgid,
+	name AS team_name
+FROM people
+INNER JOIN both_league_winners
+USING(playerid)
+INNER JOIN awardsmanagers
+USING(playerid)
+INNER JOIN managers
+USING(playerid, yearid, lgid)
+INNER JOIN teams
+USING(teamid, yearid,lgid)
+WHERE awardid = 'TSN Manager of the Year'
+ORDER BY full_name, yearid;
 
 -- 7. Which pitcher was the least efficient in 2016 in terms of salary / strikeouts? 
 -- Only consider pitchers who started at least 10 games (across all teams). Note that pitchers often play for more than one team in a season, 
 -- so be sure that you are counting all stats for each player.
+
+
 
 -- 8. Find all players who have had at least 3000 career hits. Report those players' names, total number of hits, and the year 
 -- they were inducted into the hall of fame (If they were not inducted into the hall of fame, put a null in that column.) 
@@ -177,15 +201,31 @@ JOIN teams T ON M.yearid = T.yearid;
 
 SELECT playerid, SUM(h) AS total_hits
 FROM batting 
---WHERE playerid = 'carewro01'
 GROUP BY playerid
 HAVING SUM(h) >= 3000
-ORDER BY playerid
+-- 30 results
 
-SELECT playerid, namefirst AS firstname, namelast AS lastname
-FROM people 
-WHERE namelast = 'Carew'
-"carewro01"
+WITH players_3000hits AS (
+	SELECT playerid, SUM(h) AS total_hits
+	FROM batting 
+	GROUP BY playerid
+	HAVING SUM(h) >= 3000
+), 
+hall_of_fame_list AS (
+	SELECT playerid, yearid
+	FROM halloffame
+	WHERE inducted = 'Y'
+)
+SELECT 
+	playerid, 
+	namefirst || ' ' || namelast AS full_name, 
+	total_hits, hall_of_fame_list.yearid AS inducted_year
+FROM players_3000hits
+LEFT JOIN people
+USING(playerid)
+LEFT JOIN hall_of_fame_list
+USING(playerid)
+
 
 -- 9. Find all players who had at least 1,000 hits for two different teams. Report those players' full names.
 
@@ -199,7 +239,7 @@ SELECT playerid, COUNT(teamid) AS team_count, namefirst AS firstname, namelast A
 FROM players_1000hits
 LEFT JOIN people
 USING(playerid)
-GROUP BY playerid, firstname, lastname, nameGiven
+GROUP BY playerid, firstname, lastname
 HAVING COUNT(teamid) > 1
 ORDER BY firstname
 
