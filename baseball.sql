@@ -7,7 +7,7 @@ WITH vandy AS (SELECT
 			  schoolid
 			  FROM collegeplaying
 			  WHERE schoolid = 'vandy')
-SELECT DISTINCT playerid, namefirst AS firstname, namelast AS lastname, COALESCE(SUM(salary), 0) AS total_salary
+SELECT DISTINCT playerid, namefirst AS firstname, namelast AS lastname, COALESCE(SUM(salary), 0)::NUMERIC::MONEY AS total_salary
 FROM people
 LEFT JOIN vandy
 USING(playerid)
@@ -48,62 +48,40 @@ GROUP BY position;
 -- (https://www.postgresql.org/docs/9.1/functions-srf.html). If you want to see an example of this in action, check out this DataCamp video: 
 -- https://campus.datacamp.com/courses/exploratory-data-analysis-in-sql/summarizing-and-aggregating-numeric-data?ex=6)
 
-
-SELECT yearid, ROUND(AVG(so), 2)  AS strikeouts, ROUND(AVG(hr), 2)  AS homeruns
+-- not using generate series
+SELECT yearid / 10 * 10 AS decade, 
+	ROUND((SUM(so) * 1.0) / SUM(ghome), 2) AS avg_strikeouts, 
+	ROUND((SUM(hr) * 1.0) / SUM(ghome), 2) AS avg_homeruns
 FROM teams
 WHERE yearid >= 1920
-GROUP BY yearid
-ORDER BY yearid
+GROUP BY 1
+ORDER BY 1;
 
+-- using generate_series 
 WITH bins AS (
     SELECT generate_series(1920, 2010, 10) AS lower,
            generate_series(1930, 2020, 10) AS upper)
--- count values in each bin
 SELECT 
-	lower, 
-	upper, 
-	ROUND(SUM(sto.so * 1.0)/SUM(ghome * 1.0), 2) AS avg_strikeouts,  
-	ROUND(SUM(sto.hr * 1.0)/SUM(ghome * 1.0), 2) AS avg_homeruns     
--- left join keeps bins
- FROM teams as sto
+	lower AS decade, 
+	ROUND(SUM(so * 1.0)/SUM(ghome * 1.0), 2) AS avg_strikeouts,  
+	ROUND(SUM(hr * 1.0)/SUM(ghome * 1.0), 2) AS avg_homeruns     
+FROM teams as sto
    LEFT JOIN bins AS b
        ON yearid >= lower
        AND yearid < upper
-GROUP BY lower, upper
-ORDER BY lower;
+GROUP BY decade
+ORDER BY decade;
 
---
-
-SELECT yearid / 10 * 10 AS decade,
-	ROUND((SUM(so) * 1.0) / SUM(ghome), 2) AS avg_so, -- G doubles the number of games since there are 2 teams
-	ROUND((SUM(hr) * 1.0) / SUM(ghome), 2) AS avg_hr
-FROM teams
-WHERE yearid >= 1920
-GROUP BY 1
-ORDER BY 1;
-
--- using GENERATE_SERIES
-WITH decade AS (
-	SELECT GENERATE_SERIES(1920, 2016, 10) AS start_year,
-		GENERATE_SERIES(1929, 2019, 10) AS end_year
-)
-
-SELECT start_year AS decade,
-ROUND((SUM(so) * 1.0) / SUM(ghome), 2) AS avg_so, -- G doubles the number of games since there are 2 teams
-	ROUND((SUM(hr) * 1.0) / SUM(ghome), 2) AS avg_hr
-FROM teams
-LEFT JOIN decade
-	ON yearid BETWEEN start_year AND end_year
-WHERE yearid >= 1920
-GROUP BY 1
-ORDER BY 1;
+-- In 1920, the avg strickouts and  homeruns were 5.63 and 0.80, and by 2010 it has increased almost three times 
+-- and two times ( 15.04 and 1.97) the beginning value of the data. 
 
 -- 4. Find the player who had the most success stealing bases in 2016, where success is measured as the percentage of stolen base attempts which are successful. 
 -- (A stolen base attempt results either in a stolen base or being caught stealing.) Consider only players who attempted at least 20 stolen bases. 
 -- Report the players' names, number of stolen bases, number of attempts, and stolen base percentage.
 
 SELECT playerid, namefirst AS firstname, namelast AS lastname, SUM(sb) AS total_sb, 
-	SUM(sb + cs) AS total_attempts, ROUND((SUM(sb * 1.0)/SUM(sb + cs)* 1.0)*100, 2) AS percentage
+	SUM(sb + cs) AS total_attempts, 
+	CONCAT(ROUND((SUM(sb * 1.0)/SUM(sb + cs)* 1.0)*100, 2), '%') AS percentage
 FROM batting
 LEFT JOIN people
 USING(playerid)
@@ -112,18 +90,82 @@ GROUP BY 1, 2, 3
 HAVING SUM(sb + cs) >= 20
 ORDER BY percentage DESC;
 
--- Chris Owings had the highest percentage of successful stolen bases in 2016 with 91.3 %.
+-- Chris Owings had the highest percentage of successful stolen bases in 2016 with 91.3%.
 
 
 -- 5. From 1970 to 2016, what is the largest number of wins for a team that did not win the world series? 
--- What is the smallest number of wins for a team that did win the world series? Doing this will probably result in an unusually small number 
--- of wins for a world series champion; determine why this is the case. Then redo your query, excluding the problem year. 
+-- What is the smallest number of wins for a team that did win the world series? 
+-- Doing this will probably result in an unusually small number of wins for a world series champion; determine why this is the case. 
+-- Then redo your query, excluding the problem year. 
 -- How often from 1970 to 2016 was it the case that a team with the most wins also won the world series? What percentage of the time?
 
 
+SELECT teamid, name, w, yearid
+FROM teams
+WHERE yearid BETWEEN 1970 and 2016 AND wsWin = 'N'
+ORDER BY w DESC
+
+-- Largest number of wins that didn't win the world series is 116 wins by Seattle Mariners in 2001. 
+
+SELECT teamid, name, w, yearid
+FROM teams
+WHERE yearid BETWEEN 1970 and 2016 AND wsWin = 'Y'
+ORDER BY w;
+
+-- Smallest number of wins by a team that won the world series is 63 wins by LA Dodgers in 1981. 
+-- This was possible because in 1981, there was a major league baseball strike that caused work stoppage. 
+
+SELECT teamid, name, w, yearid
+FROM teams
+WHERE yearid BETWEEN 1970 and 2016 
+	AND wsWin = 'Y'
+	AND yearid != 1981
+ORDER BY w;
+
+-- Smallest number of wins by a team that won the world series is 83 wins by SLN in 2006.
+
+
+-- How often from 1970 to 2016 was it the case that a team with the most wins also won the world series? What percentage of the time?
+
+
+SELECT yearid, 
+MAX(w) AS max_wins
+FROM teams 
+WHERE yearid BETWEEN 1970 AND 2016 
+GROUP BY yearid
+ORDER BY yearid;
+
+SELECT DISTINCT yearid
+FROM teams 
+WHERE yearid BETWEEN 1970 AND 2016 
+ORDER BY yearid
+
+
+--
+
+	
+WITH max_win_per_year AS (
+    SELECT 
+        yearid, 
+        MAX(w) AS max_wins
+    FROM teams 
+    WHERE yearid BETWEEN 1970 AND 2016 
+    GROUP BY yearid
+)
+SELECT 
+    COUNT(DISTINCT M.yearid) AS occurrences,
+    SUM(CASE WHEN T.w = M.max_wins AND T.wswin = 'Y' THEN 1 ELSE 0 END) AS ws_win_count,
+    ROUND((SUM(CASE WHEN T.w = M.max_wins AND T.wswin = 'Y' THEN 1 ELSE 0 END) * 100.0) / COUNT(DISTINCT M.yearid), 2) AS percentage
+FROM max_win_per_year M
+JOIN teams T ON M.yearid = T.yearid;
+
+-- From 1970 to 2016, there were 12 teams with the most wins that also won the world series. 
+-- 12/47 is a 25.53% chance that the team with the most wins also wins the world series. 
 
 -- 6. Which managers have won the TSN Manager of the Year award in both the National League (NL) and the American League (AL)? 
 -- Give their full name and the teams that they were managing when they won the award.
+
+
 
 -- 7. Which pitcher was the least efficient in 2016 in terms of salary / strikeouts? 
 -- Only consider pitchers who started at least 10 games (across all teams). Note that pitchers often play for more than one team in a season, 
@@ -133,7 +175,37 @@ ORDER BY percentage DESC;
 -- they were inducted into the hall of fame (If they were not inducted into the hall of fame, put a null in that column.) 
 -- Note that a player being inducted into the hall of fame is indicated by a 'Y' in the inducted column of the halloffame table.
 
+SELECT playerid, SUM(h) AS total_hits
+FROM batting 
+--WHERE playerid = 'carewro01'
+GROUP BY playerid
+HAVING SUM(h) >= 3000
+ORDER BY playerid
+
+SELECT playerid, namefirst AS firstname, namelast AS lastname
+FROM people 
+WHERE namelast = 'Carew'
+"carewro01"
+
 -- 9. Find all players who had at least 1,000 hits for two different teams. Report those players' full names.
+
+WITH players_1000hits AS (
+	SELECT playerid, teamid, SUM(h) AS total_hits
+	FROM batting 
+	GROUP BY playerid, teamid
+	HAVING SUM(h) > 1000
+)
+SELECT playerid, COUNT(teamid) AS team_count, namefirst AS firstname, namelast AS lastname
+FROM players_1000hits
+LEFT JOIN people
+USING(playerid)
+GROUP BY playerid, firstname, lastname, nameGiven
+HAVING COUNT(teamid) > 1
+ORDER BY firstname
+
+-- There are 14 players who had more than 1000 hits for more than one team. 
+
+
 
 -- 10. Find all players who hit their career highest number of home runs in 2016. Consider only players who have played in the league 
 -- for at least 10 years, and who hit at least one home run in 2016. Report the players' first and last names and the number of home runs they hit in 2016.
